@@ -1,0 +1,3 @@
+com/magg/DemoRedisApplication.class
+com/magg/config/RedisConfiguration.class
+com/magg/service/RedisReciever.class
