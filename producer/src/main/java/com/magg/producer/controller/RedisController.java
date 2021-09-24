@@ -1,6 +1,6 @@
-package com.magg.controller;
+package com.magg.producer.controller;
 
-import com.magg.service.RedisSender;
+import com.magg.producer.service.RedisSender;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

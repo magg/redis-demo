@@ -1,5 +1,6 @@
 package com.magg;
 
+import com.magg.producer.DemoRedisApplication;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.junit.AfterClass;

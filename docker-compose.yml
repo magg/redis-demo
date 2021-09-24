@@ -5,6 +5,9 @@ services:
     ports:
       - "6379:6379"
     restart: on-failure
+    command: redis-server --appendonly yes
+    volumes:
+      - ./data:/data
     networks:
       test:
 
