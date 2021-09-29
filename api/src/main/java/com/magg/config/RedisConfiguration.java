@@ -1,5 +1,6 @@
-package com.magg.consumer.config;
+package com.magg.config;
 
+import com.magg.model.QueueDto;
 import java.io.Serializable;
 import javax.annotation.PreDestroy;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
@@ -19,10 +20,8 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 public class RedisConfiguration
 {
 
-    private final LettuceConnectionFactory redisConnectionFactory; 
     public RedisConfiguration(LettuceConnectionFactory redisConnectionFactory)
     {
-        this.redisConnectionFactory = redisConnectionFactory;
     }
 
     @Bean
@@ -45,5 +44,14 @@ public class RedisConfiguration
     public ReactiveStringCommands stringCommands(final ReactiveRedisConnectionFactory reactiveRedisConnectionFactory) {
         return reactiveRedisConnectionFactory.getReactiveConnection()
             .stringCommands();
+    }
+
+    @Bean
+    public RedisTemplate<String, QueueDto> queueTemplate(LettuceConnectionFactory redisConnectionFactory) {
+        RedisTemplate<String, QueueDto> template = new RedisTemplate<>();
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.setConnectionFactory(redisConnectionFactory);
+        return template;
     }
 }

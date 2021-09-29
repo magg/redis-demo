@@ -1,6 +1,6 @@
 package com.magg;
 
-import com.magg.producer.DemoRedisApplication;
+import com.magg.producer.ProducerRedisApplication;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.junit.AfterClass;
@@ -20,7 +20,7 @@ import reactor.test.StepVerifier;
 import redis.embedded.RedisServerBuilder;
 
 @RunWith(SpringRunner.class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = DemoRedisApplication.class)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, classes = ProducerRedisApplication.class)
 @DirtiesContext(classMode = ClassMode.BEFORE_CLASS)
 public class DemoRedisApplicationTests {
 
