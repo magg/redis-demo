@@ -2,18 +2,25 @@ package com.magg.consumer.service;
 
 import com.magg.repository.QueueRepository;
 import com.magg.repository.ZsetRepository;
+import java.time.Duration;
 import java.util.Set;
 import javax.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Scope;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 
 @Slf4j
-@Service
-public class RedisReciever
+@Component
+@Scope("application")
+public class RedisReceiver implements Runnable
 {
     @Value("${spring.application.name}")
     private String appName;
@@ -36,7 +43,7 @@ public class RedisReciever
         }
     }
 
-    public RedisReciever(StringRedisTemplate redisTemplate, QueueRepository queueRepository, ZsetRepository zsetRepository)
+    public RedisReceiver(StringRedisTemplate redisTemplate, QueueRepository queueRepository, ZsetRepository zsetRepository)
     {
         this.redisTemplate = redisTemplate;
         this.listOps = redisTemplate.opsForList();
@@ -44,26 +51,37 @@ public class RedisReciever
         this.zsetRepository = zsetRepository;
     }
 
-    @Scheduled(fixedRate = 5000)
-    public void listen(){
+    public void listen()
+    {
 
         String pending = LIST_NAME + appName;
 
         queueName = LIST_NAME + appName;
-        try {
-            String data = listOps.rightPopAndLeftPush(pending, queueName);
 
-            if (data != null && !data.isEmpty()) {
-                Thread.sleep(8000);
-                String str = listOps.rightPop(queueName); //block, remove the temporary Queue
-                zsetRepository.decr(appName);
-                log.info("Data - " + str + " received through Redis List - ");
-                queueRepository.delete(data);
+        while (true) {
+            try {
+                String data = listOps.rightPopAndLeftPush(pending, queueName, Duration.ofMinutes(1L) );
+
+                if (data != null && !data.isEmpty()) {
+                    Thread.sleep(8000);
+                    String str = listOps.rightPop(queueName); //block, remove the temporary Queue
+                    zsetRepository.decr(appName);
+                    log.info("Data - " + str + " received through Redis List - ");
+                    queueRepository.delete(data);
+                }
+
+            } catch (QueryTimeoutException e) {
+                log.info("timeout");
+            } catch (InterruptedException ie) {
+                // Preserve interrupt status
+                Thread.currentThread().interrupt();
             }
-
-        } catch (Exception e) {
-            log.error(e.getMessage(), e);
         }
+    }
 
+    @Override
+    public void run()
+    {
+        listen();
     }
 }

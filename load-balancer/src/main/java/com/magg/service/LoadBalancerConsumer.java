@@ -3,20 +3,20 @@ package com.magg.service;
 import com.magg.model.QueueDto;
 import com.magg.repository.QueueRepository;
 import com.magg.repository.ZsetRepository;
-import java.util.LinkedList;
-import java.util.Queue;
+import java.time.Duration;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.HashOperations;
+import org.springframework.context.annotation.Scope;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
-@Service
+@Component
+@Scope("application")
 @Slf4j
-public class LoadBalancerConsumer
+public class LoadBalancerConsumer implements Runnable
 {
 
     private static final String LIST_NAME = "demo_list";
@@ -29,9 +29,6 @@ public class LoadBalancerConsumer
     private final QueueRepository queueRepository;
     private final ZsetRepository zsetRepository;
 
-    Queue<Integer> q = new LinkedList<>();
-
-
     public LoadBalancerConsumer(
         StringRedisTemplate redisTemplate,
         RedisTemplate<String, QueueDto> queueTemple,
@@ -42,26 +39,24 @@ public class LoadBalancerConsumer
         this.listOps = redisTemplate.opsForList();
         this.queueRepository = queueRepository;
         this.zsetRepository = zsetRepository;
-        q.add(1);
-        q.add(2);
     }
 
-    @Scheduled(fixedRate = 5000)
+
     public void listen() {
 
-        String queueName = "statements.pending.load.balance";
-        try {
-            String data = listOps.rightPop(LIST_NAME);
+        while (true) {
+            String queueName = "statements.pending.load.balance";
+            try {
+                String data = listOps.rightPop(LIST_NAME, Duration.ofMinutes(1L));
 
-            Thread.sleep(5000);
-            if (data != null && !data.isEmpty()) {
-                loadBalanceQueuesFromMainQueue(data);
+                if (data != null && !data.isEmpty()) {
+                    loadBalanceQueuesFromMainQueue(data);
+                }
+
+            } catch (QueryTimeoutException e) {
+                log.info("lb timeout nothing to process");
             }
-
-        } catch (Exception e) {
-            log.error(e.getMessage(), e);
         }
-
     }
 
     private void loadBalanceQueuesFromMainQueue(String data) {
@@ -104,5 +99,9 @@ public class LoadBalancerConsumer
     }
 
 
-
+    @Override
+    public void run()
+    {
+        listen();
+    }
 }
