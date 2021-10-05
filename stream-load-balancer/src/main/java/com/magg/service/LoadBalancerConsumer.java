@@ -1,20 +1,20 @@
-package com.magg.streamconsumer;
+package com.magg.service;
 
+import com.magg.model.QueueDto;
 import com.magg.model.TransactionModel;
-
 import com.magg.repository.QueueRepository;
 import com.magg.repository.ZsetRepository;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import javax.annotation.PostConstruct;
+import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.stream.MapRecord;
@@ -22,26 +22,29 @@ import org.springframework.data.redis.connection.stream.ObjectRecord;
 import org.springframework.data.redis.connection.stream.PendingMessage;
 import org.springframework.data.redis.connection.stream.PendingMessages;
 import org.springframework.data.redis.connection.stream.RecordId;
+import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.stream.StreamListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
-import java.net.InetAddress;
-import java.util.concurrent.atomic.AtomicInteger;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class StreamConsumer implements StreamListener<String, ObjectRecord<String, TransactionModel>> {
+public class LoadBalancerConsumer implements StreamListener<String, ObjectRecord<String, TransactionModel>>
+{
 
     private AtomicInteger atomicInteger = new AtomicInteger(0);
+    private AtomicInteger atomicIntegerPublished = new AtomicInteger(0);
+
 
     private final ReactiveRedisTemplate<String, String> redisTemplate;
-    private final QueueRepository queueRepository;
     private final ZsetRepository zsetRepository;
+    private final QueueRepository queueRepository;
+
+    private final String WORKER_STREAM_PREFIX = "transaction-events-";
 
     private static final long MAX_RETRY = 3L;
 
@@ -55,16 +58,6 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
     private String streamKey;
     @Value("${stream.failure-list-key}")
     private String failureList;
-    @Value("${spring.application.name}")
-    private String appName;
-
-    @PostConstruct
-    public void init() {
-        Set<String> workerSet = zsetRepository.getAll();
-        if (!workerSet.contains(appName)) {
-            zsetRepository.add(appName);
-        }
-    }
 
     @Override
     @SneakyThrows
@@ -73,7 +66,9 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
 
 
         log.info("message {} ", record.getValue());
-        process(record.getValue());
+
+        loadBalanceQueuesFromMainQueue(record.getValue());
+
         atomicInteger.incrementAndGet();
 
         redisTemplate
@@ -86,6 +81,7 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
     @Scheduled(fixedRate = 10000)
     public void showPublishedEventsSoFar(){
         log.info("Total Consumer :: " + atomicInteger.get());
+        log.info("Total Produced :: " + atomicIntegerPublished.get());
     }
 
 
@@ -120,8 +116,8 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
             ByteBuffer.wrap(streamKey.getBytes(StandardCharsets.UTF_8)),
             streamConsumerGroupName,
             streamConsumerName,
-            Duration.ofSeconds(5),result
-           );
+            Duration.ofMillis(20),result
+        );
 
         log.info("Message: " + pendingMessage.getIdAsString() + " has been claimed by " + streamConsumerGroupName + ":" + streamConsumerName);
     }
@@ -140,8 +136,8 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
 
         messagesToProcess
             .subscribe(message -> {
-            testProcess(message.getValue(), pendingMessage);
-        });
+                testProcess(message.getValue(), pendingMessage);
+            });
     }
 
     public void testProcess(Map<Object, Object> kvp, PendingMessage pendingMessage) {
@@ -159,7 +155,8 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
                 TransactionModel light = new TransactionModel(id, name);
 
                 //process
-                process(light);
+
+                loadBalanceQueuesFromMainQueue(light);
 
                 log.info("message procssed: {}", light);
                 log.info("Message has been processed after retrying");
@@ -180,14 +177,45 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
             .subscribe(System.out::println);
     }
 
+    private void loadBalanceQueuesFromMainQueue(TransactionModel event) {
+        String data = event.getName();
+        QueueDto queueDto = queueRepository.get(data);
+        if (queueDto != null) {
 
-    public void process(TransactionModel transactionModel) throws InterruptedException
-    {
-        String str = transactionModel.getName();
-        Thread.sleep(3000);
-        zsetRepository.decr(appName);
-        log.info("Data - " + str + " received through Redis List - ");
-        queueRepository.delete(str);
+            String streamName = WORKER_STREAM_PREFIX + queueDto.getName();
+
+            publishEvent(event, streamName);
+
+            zsetRepository.incr(queueDto.getName());
+        } else {
+
+            Set<String> myset = zsetRepository.getOrdered();
+            for (String s :myset) {
+                Double res = zsetRepository.get(s);
+                log.info("queue {}, score {}", s, res);
+            }
+            String queue = myset.iterator().next();
+            zsetRepository.incr(queue);
+            QueueDto dto = new QueueDto(data, queue);
+            queueRepository.create(dto);
+            String streamName = WORKER_STREAM_PREFIX + dto.getName();
+
+
+            publishEvent(event, streamName);
+        }
+        log.info("Data - " + data + " load balanced - ");
+    }
+
+    public void publishEvent(TransactionModel event, String streamName){
+        log.info("Event Details :: "+event);
+        ObjectRecord<String, TransactionModel> record = StreamRecords.newRecord()
+            .ofObject(event)
+            .withStreamKey(streamName);
+        this.redisTemplate
+            .opsForStream()
+            .add(record)
+            .subscribe(System.out::println);
+        atomicIntegerPublished.incrementAndGet();
     }
 
 }

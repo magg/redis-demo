@@ -141,5 +141,6 @@
     <module>api</module>
     <module>stream-producer</module>
     <module>stream-consumer</module>
+    <module>stream-load-balancer</module>
   </modules>
 </project>

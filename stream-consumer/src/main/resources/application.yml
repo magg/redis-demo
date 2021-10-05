@@ -3,7 +3,7 @@ server:
 
 
 stream:
-  key: transaction-events
+  key: transaction-events-${spring.application.name}
   consumer-group-name: stream-statements-${spring.application.name}-group
   consumer-name: stream-statements-${spring.application.name}
   failure-list-key: failure-list

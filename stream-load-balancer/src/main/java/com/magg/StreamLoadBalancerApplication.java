@@ -9,10 +9,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableScheduling
 @Import(RedisConfiguration.class)
-public class RedisConsumerApplication {
+public class StreamLoadBalancerApplication
+{
 
-    public static void main(String[] args) {
-        SpringApplication.run(RedisConsumerApplication.class, args);
-    }
+	public static void main(String[] args) {
+		SpringApplication.run(StreamLoadBalancerApplication.class, args);
+	}
 
 }

@@ -1,5 +1,5 @@
 stream:
-  key: transaction-events
+  key: stream-statements
 
 publish:
   rate: 10000
