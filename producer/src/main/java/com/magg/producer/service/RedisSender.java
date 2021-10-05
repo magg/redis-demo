@@ -7,7 +7,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
-public class RedisSender {
+public class  RedisSender {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RedisSender.class);
 

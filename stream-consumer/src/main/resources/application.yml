@@ -1,0 +1,21 @@
+server:
+  port: 0
+
+
+stream:
+  key: transaction-events
+  consumer-group-name: stream-statements-${spring.application.name}-group
+  consumer-name: stream-statements-${spring.application.name}
+  failure-list-key: failure-list
+
+spring:
+  redis:
+    host: localhost
+    port: 6379
+    lettuce:
+      pool:
+        max-active: 7
+        max-idle: 7
+        min-idle: 2
+        max-wait: -1ms
+      shutdown-timeout: 200ms
