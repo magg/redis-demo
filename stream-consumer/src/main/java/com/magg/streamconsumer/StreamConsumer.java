@@ -9,18 +9,23 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Range;
+import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.ObjectRecord;
 import org.springframework.data.redis.connection.stream.PendingMessage;
 import org.springframework.data.redis.connection.stream.PendingMessages;
+import org.springframework.data.redis.connection.stream.PendingMessagesSummary;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.stream.StreamListener;
@@ -45,6 +50,8 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
 
     private static final long MAX_RETRY = 3L;
 
+    private static final long MAX_MESSAGES_TO_FETCH = 20L;
+
     @Value("${stream.consumer-group-name}")
     private String streamConsumerGroupName;
 
@@ -64,6 +71,13 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
         if (!workerSet.contains(appName)) {
             zsetRepository.add(appName);
         }
+
+        processPendingMessage();
+    }
+
+    @PreDestroy
+    public void preDestroy() {
+        zsetRepository.remove(appName);
     }
 
     @Override
@@ -79,7 +93,7 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
         redisTemplate
             .opsForStream()
             .acknowledge(streamConsumerGroupName, record)
-            .subscribe(System.out::println);
+            .subscribe();
 
     }
 
@@ -89,19 +103,36 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
     }
 
 
-    @Scheduled(fixedRate = 4000)
     public void processPendingMessage() {
 
-        Mono<PendingMessages> messages = redisTemplate.opsForStream().pending(streamKey,
-            streamConsumerGroupName, Range.unbounded(),20);
-        messages.subscribe(pendingMessages -> pendingMessages.forEach(
+        try {
+            Optional<PendingMessagesSummary> pendingMessagesSummary = Objects.requireNonNull(redisTemplate
+                    .opsForStream()
+                    .pending(streamKey, streamConsumerGroupName))
+                .blockOptional();
 
-            (pendingMessage -> {
-                claimMessage(pendingMessage);
-                processMessage(pendingMessage);
-            }))
 
-        );
+            if (pendingMessagesSummary.isPresent()) {
+                long count = pendingMessagesSummary.get().getTotalPendingMessages();
+
+                double totalLoops = Math.ceil( ((double) count / MAX_MESSAGES_TO_FETCH));
+
+                for (int i = 0; i < totalLoops; i++)  {
+                    Mono<PendingMessages> messages = redisTemplate.opsForStream().pending(streamKey,
+                        streamConsumerGroupName, Range.unbounded(),MAX_MESSAGES_TO_FETCH);
+                    messages.subscribe(pendingMessages -> pendingMessages.forEach(
+
+                        (pendingMessage -> {
+                            claimMessage(pendingMessage);
+                            processMessage(pendingMessage);
+                        }))
+                    );
+                }
+            }
+
+        } catch (RedisSystemException exception) {
+            log.info("no consumer group found");
+        }
     }
 
     /**
@@ -120,7 +151,7 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
             ByteBuffer.wrap(streamKey.getBytes(StandardCharsets.UTF_8)),
             streamConsumerGroupName,
             streamConsumerName,
-            Duration.ofSeconds(5),result
+            Duration.ofMillis(20),result
            );
 
         log.info("Message: " + pendingMessage.getIdAsString() + " has been claimed by " + streamConsumerGroupName + ":" + streamConsumerName);
@@ -160,8 +191,6 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
 
                 //process
                 process(light);
-
-                log.info("message procssed: {}", light);
                 log.info("Message has been processed after retrying");
                 ack(pendingMessage.getIdAsString());
             } catch (Exception ex) {
@@ -177,14 +206,14 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
         redisTemplate
             .opsForStream()
             .acknowledge(streamKey, streamConsumerGroupName, id)
-            .subscribe(System.out::println);
+            .subscribe();
     }
 
 
     public void process(TransactionModel transactionModel) throws InterruptedException
     {
         String str = transactionModel.getName();
-        Thread.sleep(3000);
+        Thread.sleep(5000);
         zsetRepository.decr(appName);
         log.info("Data - " + str + " received through Redis List - ");
         queueRepository.delete(str);
