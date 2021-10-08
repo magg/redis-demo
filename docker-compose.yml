@@ -11,5 +11,54 @@ services:
     networks:
       test:
 
+  worker-node-1:
+    build:
+      context: stream-consumer
+    ports:
+      - "4000:4000"
+    environment:
+      - "WORKER_NAME=worker.1"
+    #restart: on-failure
+    depends_on:
+      - redis
+    networks:
+      test:
+
+  worker-node-2:
+    build:
+      context: stream-consumer
+    ports:
+      - "5000:4000"
+    environment:
+      - "WORKER_NAME=worker.2"
+    #restart: on-failure
+    depends_on:
+      - redis
+    networks:
+      test:
+
+  producer:
+    build:
+      context: stream-producer
+    ports:
+      - "3000:3000"
+    restart: on-failure
+    depends_on:
+      - redis
+    networks:
+      test:
+
+  lb:
+    build:
+      context: stream-load-balancer
+    ports:
+      - "9999:9999"
+    restart: on-failure
+    depends_on:
+      - redis
+    networks:
+      test:
+
+
 networks:
   test:

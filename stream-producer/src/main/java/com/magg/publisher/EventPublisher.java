@@ -1,6 +1,7 @@
 package com.magg.publisher;
 
 import com.magg.model.TransactionModel;
+import com.magg.repository.EventRepository;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,9 +20,11 @@ public class EventPublisher
     @Value("${stream.key}")
     private String streamKey;
 
+    private final EventRepository eventRepository;
     private final ReactiveRedisTemplate<String, String> redisTemplate;
 
-    public EventPublisher(ReactiveRedisTemplate<String, String> redisTemplate) {
+    public EventPublisher(EventRepository eventRepository, ReactiveRedisTemplate<String, String> redisTemplate) {
+        this.eventRepository = eventRepository;
         this.redisTemplate = redisTemplate;
     }
 
@@ -37,6 +40,13 @@ public class EventPublisher
         atomicInteger.incrementAndGet();
     }
 
+    @Scheduled(fixedRateString= "${publish.rate}")
+    public void publish() {
+        TransactionModel transactionModel = this.eventRepository.getRandomTransactionModel();
+        log.info("transactionModel Details :: "+transactionModel);
+        publishEvent(transactionModel);
+    }
+    
     @Scheduled(fixedRate = 10000)
     public void showPublishedEventsSoFar(){
         log.info("Total Events :: " +atomicInteger.get());

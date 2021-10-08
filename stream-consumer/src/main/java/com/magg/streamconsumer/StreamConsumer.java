@@ -4,6 +4,7 @@ import com.magg.model.TransactionModel;
 
 import com.magg.repository.QueueRepository;
 import com.magg.repository.ZsetRepository;
+import io.lettuce.core.RedisBusyException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -18,17 +19,25 @@ import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.RedisSystemException;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.ObjectRecord;
 import org.springframework.data.redis.connection.stream.PendingMessage;
 import org.springframework.data.redis.connection.stream.PendingMessages;
 import org.springframework.data.redis.connection.stream.PendingMessagesSummary;
+import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
+import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.stream.StreamListener;
+import org.springframework.data.redis.stream.StreamMessageListenerContainer;
+import org.springframework.data.redis.stream.Subscription;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -40,7 +49,14 @@ import reactor.core.publisher.Mono;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class StreamConsumer implements StreamListener<String, ObjectRecord<String, TransactionModel>> {
+public class StreamConsumer implements
+    StreamListener<String, ObjectRecord<String, TransactionModel>>,
+    InitializingBean,
+    DisposableBean
+{
+
+    private StreamMessageListenerContainer<String, ObjectRecord<String, TransactionModel>> listenerContainer;
+    private Subscription subscription;
 
     private AtomicInteger atomicInteger = new AtomicInteger(0);
 
@@ -51,6 +67,8 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
     private static final long MAX_RETRY = 3L;
 
     private static final long MAX_MESSAGES_TO_FETCH = 20L;
+
+    private final RedisConnectionFactory redisConnectionFactory;
 
     @Value("${stream.consumer-group-name}")
     private String streamConsumerGroupName;
@@ -110,7 +128,6 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
                     .opsForStream()
                     .pending(streamKey, streamConsumerGroupName))
                 .blockOptional();
-
 
             if (pendingMessagesSummary.isPresent()) {
                 long count = pendingMessagesSummary.get().getTotalPendingMessages();
@@ -219,4 +236,61 @@ public class StreamConsumer implements StreamListener<String, ObjectRecord<Strin
         queueRepository.delete(str);
     }
 
+    @Override
+    public void destroy() throws Exception
+    {
+        if (subscription != null) {
+            subscription.cancel();
+        }
+
+        if (listenerContainer != null) {
+            listenerContainer.stop();
+        }
+    }
+
+    @Override
+    public void afterPropertiesSet() throws Exception
+    {
+        StreamMessageListenerContainer.StreamMessageListenerContainerOptions<String, ObjectRecord<String, TransactionModel>> options = StreamMessageListenerContainer
+            .StreamMessageListenerContainerOptions
+            .builder()
+            .pollTimeout(Duration.ofSeconds(1))
+            .targetType(TransactionModel.class)
+            .build();
+
+        this.listenerContainer = StreamMessageListenerContainer
+            .create(redisConnectionFactory, options);
+
+        createConsumerGroup(redisConnectionFactory);
+
+        // if you use listenerContainer.receive
+        // Every message must be acknowledged using StreamOperations.acknowledge(Object, String, String...) after processing.
+        // otherwise, you could use listenerContainer.receiveAutoAck which on
+        // Every message is acknowledged when received.
+         this.subscription = listenerContainer
+            .receive(
+                Consumer.from(streamConsumerGroupName, streamConsumerName),
+                StreamOffset.create(streamKey, ReadOffset.lastConsumed()),
+                this);
+
+        subscription.await(Duration.ofSeconds(2));
+        listenerContainer.start();
+
+    }
+
+
+    private void createConsumerGroup(RedisConnectionFactory redisConnectionFactory) {
+
+        try {
+            redisConnectionFactory.getConnection()
+                .xGroupCreate(streamKey.getBytes(), streamConsumerGroupName, ReadOffset.from("0-0"), true);
+        } catch (RedisSystemException exception) {
+            if (Objects.requireNonNull(exception.getRootCause()).getClass().equals(RedisBusyException.class))
+            {
+                log.info("STREAM - Redis group already exists, skipping Redis group creation");
+            } else {
+                log.warn(exception.getCause().getMessage());
+            }
+        }
+    }
 }

@@ -1,5 +1,5 @@
 server:
-  port: 0
+  port: 4000
 
 
 stream:
@@ -10,7 +10,7 @@ stream:
 
 spring:
   redis:
-    host: localhost
+    host: redis
     port: 6379
     lettuce:
       pool:
@@ -19,3 +19,5 @@ spring:
         min-idle: 2
         max-wait: -1ms
       shutdown-timeout: 200ms
+  application:
+    name: ${WORKER_NAME}
