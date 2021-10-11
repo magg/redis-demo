@@ -43,4 +43,9 @@ public class EventRepository
         int index = ThreadLocalRandom.current().nextInt(0, 25);
         return TransactionModel_LIST.get(index);
     }
+
+
+    public TransactionModel geTransactionModel(int index) {
+        return TransactionModel_LIST.get(index);
+    }
 }

@@ -2,7 +2,7 @@ stream:
   key: stream-statements
 
 publish:
-  rate: 10000
+  rate: 1000
 
 server:
   port: 3000

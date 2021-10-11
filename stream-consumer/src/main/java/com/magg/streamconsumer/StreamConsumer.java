@@ -96,6 +96,7 @@ public class StreamConsumer implements
     @PreDestroy
     public void preDestroy() {
         zsetRepository.remove(appName);
+        stopContainer();
     }
 
     @Override
@@ -230,7 +231,7 @@ public class StreamConsumer implements
     public void process(TransactionModel transactionModel) throws InterruptedException
     {
         String str = transactionModel.getName();
-        Thread.sleep(5000);
+        Thread.sleep(4000);
         zsetRepository.decr(appName);
         log.info("Data - " + str + " received through Redis List - ");
         queueRepository.delete(str);
@@ -239,13 +240,7 @@ public class StreamConsumer implements
     @Override
     public void destroy() throws Exception
     {
-        if (subscription != null) {
-            subscription.cancel();
-        }
-
-        if (listenerContainer != null) {
-            listenerContainer.stop();
-        }
+        stopContainer();
     }
 
     @Override
@@ -276,6 +271,9 @@ public class StreamConsumer implements
         subscription.await(Duration.ofSeconds(2));
         listenerContainer.start();
 
+
+        //close
+        Runtime.getRuntime().addShutdownHook(new Thread(this::stopContainer));
     }
 
 
@@ -291,6 +289,17 @@ public class StreamConsumer implements
             } else {
                 log.warn(exception.getCause().getMessage());
             }
+        }
+    }
+
+
+    private void stopContainer() {
+        if (subscription != null) {
+            subscription.cancel();
+        }
+
+        if (listenerContainer != null) {
+            listenerContainer.stop();
         }
     }
 }

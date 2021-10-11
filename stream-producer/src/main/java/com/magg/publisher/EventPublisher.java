@@ -42,11 +42,18 @@ public class EventPublisher
 
     @Scheduled(fixedRateString= "${publish.rate}")
     public void publish() {
-        TransactionModel transactionModel = this.eventRepository.getRandomTransactionModel();
-        log.info("transactionModel Details :: "+transactionModel);
-        publishEvent(transactionModel);
+        //TransactionModel transactionModel = this.eventRepository.getRandomTransactionModel();
+
+        int index = atomicInteger.get();
+
+        if (index < 25) {
+            TransactionModel transactionModel = this.eventRepository.geTransactionModel(index);
+            log.info("transactionModel Details :: "+transactionModel);
+            publishEvent(transactionModel);
+        }
+
     }
-    
+
     @Scheduled(fixedRate = 10000)
     public void showPublishedEventsSoFar(){
         log.info("Total Events :: " +atomicInteger.get());
